@@ -1,14 +1,15 @@
 <?php
 /**
- * Plugin Name: Woo Subscriptions
+ * Plugin Name: WooCommerce Subscriptions
  * Plugin URI: https://www.woocommerce.com/products/woocommerce-subscriptions/
  * Description: Sell products and services with recurring payments in your WooCommerce Store.
  * Author: WooCommerce
  * Author URI: https://woocommerce.com/
- * Version: 5.9.1
+ * Version: 6.8.0
+ * Requires Plugins: woocommerce
  *
- * WC requires at least: 7.7.0
- * WC tested up to: 8.2.0
+ * WC requires at least: 8.7.1
+ * WC tested up to: 9.3.0
  * Woo: 27147:6115e6d7e297b623a169fdcf5728b224
  *
  * Copyright 2019 WooCommerce
@@ -77,7 +78,7 @@ class WC_Subscriptions {
 	public static $plugin_file = __FILE__;
 
 	/** @var string */
-	public static $version = '5.9.1'; // WRCS: DEFINED_VERSION.
+	public static $version = '6.8.0'; // WRCS: DEFINED_VERSION.
 
 	/** @var string */
 	public static $wc_minimum_supported_version = '7.7';

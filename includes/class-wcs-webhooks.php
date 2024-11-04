@@ -79,10 +79,8 @@ class WCS_Webhooks {
 						'woocommerce_process_shop_subscription_meta',
 					),
 					'subscription.updated'  => array(
-						'wcs_api_subscription_updated',
-						'woocommerce_subscription_status_changed',
 						'wcs_webhook_subscription_updated',
-						'woocommerce_process_shop_subscription_meta',
+						'woocommerce_update_subscription',
 					),
 					'subscription.deleted'  => array(
 						'woocommerce_subscription_trashed',
@@ -134,6 +132,11 @@ class WCS_Webhooks {
 
 			switch ( $webhook->get_api_version() ) {
 				case 'legacy_v3':
+
+					if ( is_null( wc()->api ) ) {
+						throw new \Exception( 'The Legacy REST API plugin is not installed on this site. More information: https://developer.woocommerce.com/2023/10/03/the-legacy-rest-api-will-move-to-a-dedicated-extension-in-woocommerce-9-0/ ' );
+					}
+
 					WC()->api->WC_API_Subscriptions->register_routes( array() );
 					$payload = WC()->api->WC_API_Subscriptions->get_subscription( $resource_id );
 					break;
@@ -149,7 +152,7 @@ class WCS_Webhooks {
 
 					break;
 				case 'wp_api_v3':
-					$payload = wc()->api->get_endpoint_data( "/wc/v3/subscriptions/{$resource_id}" );
+					$payload = WCS_API::get_wc_api_endpoint_data( "/wc/v3/subscriptions/{$resource_id}" );
 					break;
 			}
 
