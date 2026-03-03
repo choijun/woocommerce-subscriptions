@@ -28,10 +28,27 @@ class WC_Subscriptions_Dependency_Manager {
 	private $wc_version_cached = false;
 
 	/**
+	 * @var boolean Whether to skip the class_exists and WC_VERSION constant checks.
+	 */
+	private $skip_class_exists_and_wc_version_constant_checks = false;
+
+	/**
 	 * Constructor.
 	 */
 	public function __construct( $minimum_supported_wc_version ) {
 		$this->minimum_supported_wc_version = $minimum_supported_wc_version;
+		/**
+		 * Filter allows to skip the class_exists and WC_VERSION constant checks.
+		 *
+		 * @since 7.8.0
+		 *
+		 * @param bool $use_class_exists Whether to use the class_exists and WC_VERSION constant checks.
+		 *
+		 * @return bool false to use the class_exists and WC_VERSION checks, true to skip them.
+		 */
+		if ( defined( 'WCS_ENVIRONMENT_TYPE' ) && WCS_ENVIRONMENT_TYPE === 'tests' && apply_filters( 'woocommerce_subscriptions_skip_class_exists_and_wc_version_constant_checks', false ) ) {
+			$this->skip_class_exists_and_wc_version_constant_checks = true;
+		}
 	}
 
 	/**
@@ -52,7 +69,7 @@ class WC_Subscriptions_Dependency_Manager {
 	 * @return bool True if the plugin is active, false otherwise.
 	 */
 	public function is_woocommerce_active() {
-		if ( class_exists( 'WooCommerce' ) ) {
+		if ( class_exists( 'WooCommerce' ) && ! $this->skip_class_exists_and_wc_version_constant_checks ) {
 			return true;
 		}
 
@@ -89,7 +106,7 @@ class WC_Subscriptions_Dependency_Manager {
 	 * @return string|null The active WooCommerce version, or null if WooCommerce is not active.
 	 */
 	private function get_woocommerce_active_version() {
-		if ( defined( 'WC_VERSION' ) ) {
+		if ( defined( 'WC_VERSION' ) && ! $this->skip_class_exists_and_wc_version_constant_checks ) {
 			return WC_VERSION;
 		}
 
@@ -99,6 +116,13 @@ class WC_Subscriptions_Dependency_Manager {
 		}
 
 		$this->wc_version_cached = true;
+
+		// Try to get version from transient first
+		$this->wc_active_version = get_transient( 'wcs_woocommerce_active_version' );
+
+		if ( false !== $this->wc_active_version ) {
+			return $this->wc_active_version;
+		}
 
 		// Load plugin.php if it's not already loaded.
 		if ( ! function_exists( 'is_plugin_active' ) ) {
@@ -122,7 +146,13 @@ class WC_Subscriptions_Dependency_Manager {
 
 			if ( $is_woocommerce && is_plugin_active( $plugin_slug ) ) {
 				$this->wc_active_version = $plugin_data['Version'];
+				break; // Found it, no need to continue looping
 			}
+		}
+
+		// Cache the result in a transient for 1 hour
+		if ( ! empty( $this->wc_active_version ) ) {
+			set_transient( 'wcs_woocommerce_active_version', $this->wc_active_version, HOUR_IN_SECONDS );
 		}
 
 		return $this->wc_active_version;

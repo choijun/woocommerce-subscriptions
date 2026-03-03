@@ -7,4 +7,5 @@ $baseDir = dirname($vendorDir);
 
 return array(
     'Composer\\Installers\\' => array($vendorDir . '/composer/installers/src/Composer/Installers'),
+    'Automattic\\WooCommerce_Subscriptions\\' => array($baseDir . '/src'),
 );

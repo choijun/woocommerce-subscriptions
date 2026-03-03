@@ -45,6 +45,7 @@ class WCS_Autoloader extends WCS_Core_Autoloader {
 		'wcs_webhooks'                              => true,
 		'wcs_auth'                                  => true,
 		'wcs_upgrade_notice_manager'                => true,
+		'wcs_admin_assets'                          => true,
 		'wc_subscriptions_cli'                      => true,
 	);
 
@@ -93,8 +94,6 @@ class WCS_Autoloader extends WCS_Core_Autoloader {
 
 		if ( stripos( $class, 'switch' ) !== false || 'wcs_add_cart_item' === $class ) {
 			$path .= '/switching';
-		} elseif ( false !== strpos( $class, 'wc_report' ) ) {
-			$path .= '/admin/reports/deprecated';
 		} elseif ( false !== strpos( $class, 'wcs_report' ) ) {
 			$path .= '/admin/reports';
 		} elseif ( false !== strpos( $class, 'retry' ) || false !== strpos( $class, 'retries' ) ) {
@@ -122,13 +121,10 @@ class WCS_Autoloader extends WCS_Core_Autoloader {
 	 */
 	protected function should_autoload( $class ) {
 		static $legacy = array(
-			'wc_order_item_pending_switch'         => 1,
-			'wc_report_retention_rate'             => 1,
-			'wc_report_upcoming_recurring_revenue' => 1,
+			'wc_order_item_pending_switch' => 1,
 		);
 
 		return isset( $legacy[ $class ] ) ? true : parent::should_autoload( $class );
-
 	}
 
 	/**

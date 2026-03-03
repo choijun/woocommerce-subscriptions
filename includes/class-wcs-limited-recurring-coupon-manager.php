@@ -77,28 +77,33 @@ class WCS_Limited_Recurring_Coupon_Manager {
 	 * Get the number of renewals for a limited coupon.
 	 *
 	 * @since 4.0.0
-	 * @param string $code The coupon code.
+	 * @param string|WC_Coupon $coupon The coupon or coupon code.
 	 * @return false|int False for non-recurring coupons, or the limit number for recurring coupons.
 	 *                   A value of 0 is for unlimited usage.
 	 */
-	public static function get_coupon_limit( $code ) {
-		if ( wcs_is_woocommerce_pre( '3.2' ) ) {
+	public static function get_coupon_limit( $coupon ) {
+		// If we have a coupon code, attempt to get the coupon object.
+		if ( is_string( $coupon ) ) {
+			$coupon = new WC_Coupon( $coupon );
+		}
+
+		if ( ! $coupon instanceof WC_Coupon ) {
 			return false;
 		}
 
-		// Retrieve the coupon data.
-		$coupon      = new WC_Coupon( $code );
 		$coupon_type = $coupon->get_discount_type();
 
 		// If we have a virtual coupon, attempt to get the original coupon.
 		if ( WC_Subscriptions_Coupon::is_renewal_cart_coupon( $coupon_type ) ) {
-			$coupon      = WC_Subscriptions_Coupon::map_virtual_coupon( $code );
+			$coupon      = WC_Subscriptions_Coupon::map_virtual_coupon( $coupon->get_code() );
 			$coupon_type = $coupon->get_discount_type();
 		}
 
-		$limited = $coupon->get_meta( self::$coupons_renewals );
+		if ( ! WC_Subscriptions_Coupon::is_recurring_coupon( $coupon_type ) ) {
+			return false;
+		}
 
-		return WC_Subscriptions_Coupon::is_recurring_coupon( $coupon_type ) ? intval( $limited ) : false;
+		return intval( $coupon->get_meta( self::$coupons_renewals ) );
 	}
 
 	/**
@@ -266,11 +271,16 @@ class WCS_Limited_Recurring_Coupon_Manager {
 	 * @param int    $id          The coupon ID.
 	 */
 	public static function add_limit_to_list_table( $column_name, $id ) {
+		global $the_coupon;
+
 		if ( 'usage' !== $column_name ) {
 			return;
 		}
 
-		$limit = self::get_coupon_limit( wc_get_coupon_code_by_id( $id ) );
+		// Confirm the global coupon object is the one we're looking for, otherwise fetch it.
+		$coupon = empty( $the_coupon ) || $the_coupon->get_id() !== $id ? new WC_Coupon( $id ) : $the_coupon;
+		$limit  = self::get_coupon_limit( $coupon );
+
 		if ( false === $limit ) {
 			return;
 		}
@@ -303,13 +313,14 @@ class WCS_Limited_Recurring_Coupon_Manager {
 		}
 
 		// Bail early if there are no limited coupons applied to the recurring cart or if there is no discount provided.
+		// @phpstan-ignore property.notFound
 		if ( empty( $limited_recurring_coupons ) || ! $recurring_cart->discount_cart ) {
 			return false;
 		}
 
 		$has_expiring_coupon   = false;
 		$subscription_length   = wcs_cart_pluck( $recurring_cart, 'subscription_length' );
-		$subscription_payments = $subscription_length / wcs_cart_pluck( $recurring_cart, 'subscription_period_interval' );
+		$subscription_payments = (int) $subscription_length / (int) wcs_cart_pluck( $recurring_cart, 'subscription_period_interval' );
 
 		// Limited recurring coupons will always expire at some point on subscriptions with no length.
 		if ( empty( $subscription_length ) ) {
@@ -346,7 +357,12 @@ class WCS_Limited_Recurring_Coupon_Manager {
 		$has_limited_coupon = false;
 
 		if ( $change_payment && isset( $_GET['_wpnonce'] ) && wp_verify_nonce( sanitize_text_field( wp_unslash( $_GET['_wpnonce'] ) ) ) ) {
-			$subscription       = wcs_get_subscription( $change_payment );
+			$subscription = wcs_get_subscription( $change_payment );
+
+			if ( ! $subscription ) {
+				return $gateways;
+			}
+
 			$has_limited_coupon = self::order_has_limited_recurring_coupon( $subscription );
 		}
 
@@ -371,7 +387,6 @@ class WCS_Limited_Recurring_Coupon_Manager {
 	 *
 	 * @since 4.0.0
 	 *
-	 * @param string $message The current message indicating there are no payment methods available..
 	 * @return string The filtered message indicating there are no payment methods available.
 	 */
 	public static function no_available_payment_methods_message() {

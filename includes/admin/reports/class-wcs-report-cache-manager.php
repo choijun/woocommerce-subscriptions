@@ -75,10 +75,9 @@ class WCS_Report_Cache_Manager {
 	/**
 	 * Attach callbacks to manage cache updates
 	 *
-	 * @since 2.1
+	 * @since 7.8.0 - Compatible with HPOS, originally introduced in 2.1
 	 */
 	public function __construct() {
-
 		// Use the old hooks
 		if ( wcs_is_woocommerce_pre( '3.0' ) ) {
 
@@ -117,7 +116,7 @@ class WCS_Report_Cache_Manager {
 	 * This function is attached as a callback on the events in the $update_events_and_classes property.
 	 *
 	 * @since 2.1
-	 * @return null
+	 * @return void
 	 */
 	public function set_reports_to_update() {
 		if ( isset( $this->update_events_and_classes[ current_filter() ] ) ) {
@@ -141,37 +140,38 @@ class WCS_Report_Cache_Manager {
 	 */
 	public function schedule_cache_updates() {
 
-		if ( ! empty( $this->reports_to_update ) ) {
+		if ( empty( $this->reports_to_update ) ) {
+			return;
+		}
 
-			// On large sites, we want to run the cache update once at 4am in the site's timezone
-			if ( $this->use_large_site_cache() ) {
+		// On large sites, we want to run the cache update once at 4am in the site's timezone
+		if ( $this->use_large_site_cache() ) {
 
-				$cache_update_timestamp = $this->get_large_site_cache_update_timestamp();
+			$cache_update_timestamp = $this->get_large_site_cache_update_timestamp();
 
-				// Schedule one update event for each class to avoid updating cache more than once for the same class for different events
-				foreach ( $this->reports_to_update as $index => $report_class ) {
+			// Schedule one update event for each class to avoid updating cache more than once for the same class for different events
+			foreach ( $this->reports_to_update as $index => $report_class ) {
 
-					$cron_args = array( 'report_class' => $report_class );
+				$cron_args = array( 'report_class' => $report_class );
 
-					if ( false === as_next_scheduled_action( $this->cron_hook, $cron_args ) ) {
-						// Use the index to space out caching of each report to make them 15 minutes apart so that on large sites, where we assume they'll get a request at least once every few minutes, we don't try to update the caches of all reports in the same request
-						as_schedule_single_action( $cache_update_timestamp + 15 * MINUTE_IN_SECONDS * ( $index + 1 ), $this->cron_hook, $cron_args );
-					}
+				if ( false === as_next_scheduled_action( $this->cron_hook, $cron_args ) ) {
+					// Use the index to space out caching of each report to make them 15 minutes apart so that on large sites, where we assume they'll get a request at least once every few minutes, we don't try to update the caches of all reports in the same request
+					as_schedule_single_action( $cache_update_timestamp + 15 * MINUTE_IN_SECONDS * ( $index + 1 ), $this->cron_hook, $cron_args );
 				}
-			} else { // Otherwise, run it 10 minutes after the last cache invalidating event
+			}
+		} else { // Otherwise, run it 10 minutes after the last cache invalidating event
 
-				// Schedule one update event for each class to avoid updating cache more than once for the same class for different events
-				foreach ( $this->reports_to_update as $index => $report_class ) {
+			// Schedule one update event for each class to avoid updating cache more than once for the same class for different events
+			foreach ( $this->reports_to_update as $index => $report_class ) {
 
-					$cron_args = array( 'report_class' => $report_class );
+				$cron_args = array( 'report_class' => $report_class );
 
-					if ( false !== as_next_scheduled_action( $this->cron_hook, $cron_args ) ) {
-						as_unschedule_action( $this->cron_hook, $cron_args );
-					}
-
-					// Use the index to space out caching of each report to make them 5 minutes apart so that on large sites, where we assume they'll get a request at least once every few minutes, we don't try to update the caches of all reports in the same request
-					as_schedule_single_action( gmdate( 'U' ) + MINUTE_IN_SECONDS * ( $index + 1 ) * 5, $this->cron_hook, $cron_args );
+				if ( false !== as_next_scheduled_action( $this->cron_hook, $cron_args ) ) {
+					as_unschedule_action( $this->cron_hook, $cron_args );
 				}
+
+				// Use the index to space out caching of each report to make them 5 minutes apart so that on large sites, where we assume they'll get a request at least once every few minutes, we don't try to update the caches of all reports in the same request
+				as_schedule_single_action( (int) gmdate( 'U' ) + MINUTE_IN_SECONDS * ( $index + 1 ) * 5, $this->cron_hook, $cron_args );
 			}
 		}
 	}
@@ -180,7 +180,6 @@ class WCS_Report_Cache_Manager {
 	 * Update the cache data for a given report, as specified with $report_class, by call it's get_data() method.
 	 *
 	 * @since 2.1
-	 * @return null
 	 */
 	public function update_cache( $report_class ) {
 		/**
@@ -212,7 +211,19 @@ class WCS_Report_Cache_Manager {
 
 		// Load report class dependencies
 		require_once( ABSPATH . 'wp-admin/includes/class-wp-list-table.php' );
-		require_once( WC()->plugin_path() . '/includes/admin/reports/class-wc-admin-report.php' );
+
+		$within_ci_environment = getenv( 'CI' );
+		$wc_core_dir_from_env  = getenv( 'WC_CORE_DIR' );
+
+		if ( $within_ci_environment && ! empty( $wc_core_dir_from_env ) ) {
+			$wc_core_dir = $wc_core_dir_from_env;
+		} elseif ( $within_ci_environment ) {
+			$wc_core_dir = '/tmp/woocommerce';
+		} else {
+			$wc_core_dir = WC()->plugin_path();
+		}
+
+		require_once( $wc_core_dir . '/includes/admin/reports/class-wc-admin-report.php' );
 
 		$reflector = new ReflectionMethod( $report_class, 'get_data' );
 
@@ -321,7 +332,7 @@ class WCS_Report_Cache_Manager {
 				'label'   => 'Cache Update Failures',
 				/* translators: %d refers to the number of times we have detected cache update failures */
 				'note'    => sprintf( _n( '%d failures', '%d failure', $failures, 'woocommerce-subscriptions' ), $failures ),
-				'success' => 0 === $failures,
+				'success' => 0 === (int)$failures,
 			),
 		);
 

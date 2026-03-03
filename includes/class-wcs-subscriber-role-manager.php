@@ -26,8 +26,10 @@ class WCS_Subscriber_Role_Manager {
 	 * @return array Subscriptions settings.
 	 */
 	public static function add_settings( $settings ) {
+		$roles_options = array();
+
 		if ( ! function_exists( 'get_editable_roles' ) ) {
-			require_once( ABSPATH . 'wp-admin/includes/user.php' );
+			require_once ABSPATH . 'wp-admin/includes/user.php';
 		}
 
 		foreach ( get_editable_roles() as $role => $details ) {
@@ -56,7 +58,7 @@ class WCS_Subscriber_Role_Manager {
 			),
 			array(
 				'name'     => __( 'Inactive Subscriber Role', 'woocommerce-subscriptions' ),
-				'desc'     => __( 'If a subscriber\'s subscription is manually cancelled or expires, she will be assigned this role.', 'woocommerce-subscriptions' ),
+				'desc'     => __( 'If a subscriber\'s subscription is manually cancelled or expires, they will be assigned this role.', 'woocommerce-subscriptions' ),
 				'tip'      => '',
 				'id'       => WC_Subscriptions_Admin::$option_prefix . '_cancelled_role',
 				'css'      => 'min-width:150px;',
@@ -72,7 +74,10 @@ class WCS_Subscriber_Role_Manager {
 			),
 		);
 
-		WC_Subscriptions_Admin::insert_setting_after( $settings, WC_Subscriptions_Admin::$option_prefix . '_button_text', $role_settings, 'multiple_settings', 'sectionend' );
+		if ( ! WC_Subscriptions_Admin::insert_setting_after( $settings, WC_Subscriptions_Admin::$option_prefix . '_button_text', $role_settings, 'multiple_settings', 'sectionend' ) ) {
+			$settings = array_merge( $settings, $role_settings );
+		}
+
 		return $settings;
 	}
 

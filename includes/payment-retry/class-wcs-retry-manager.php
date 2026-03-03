@@ -47,6 +47,12 @@ class WCS_Retry_Manager {
 		self::$setting_id = WC_Subscriptions_Admin::$option_prefix . '_enable_retry';
 		self::$admin      = new WCS_Retry_Admin( self::$setting_id );
 
+		// Show admin notice if the retry table is missing.
+		add_action( 'admin_notices', array( __CLASS__, 'maybe_show_missing_table_notice' ) );
+
+		// Add debug tools to the WooCommerce > Status > Tools administration screen.
+		add_filter( 'woocommerce_debug_tools', array( __CLASS__, 'add_retry_manager_debug_tools' ) );
+
 		if ( self::is_retry_enabled() ) {
 			WCS_Retry_Email::init();
 
@@ -295,7 +301,7 @@ class WCS_Retry_Manager {
 	 * and if so, retry the payment.
 	 *
 	 * @since 2.1.0
-	 * @param WC_Order|int The order on which the payment failed.
+	 * @param WC_Order|int $order_id The order on which the payment failed.
 	 */
 	public static function maybe_retry_payment( $order_id ) {
 		$last_order = ! is_object( $order_id ) ? wc_get_order( $order_id ) : $order_id;
@@ -308,7 +314,7 @@ class WCS_Retry_Manager {
 		$last_retry    = self::store()->get_last_retry_for_order( wcs_get_objects_property( $last_order, 'id' ) );
 
 		// we only need to retry the payment if we have applied a retry rule for the order and it still needs payment
-		if ( null !== $last_retry && 'pending' === $last_retry->get_status() ) {
+		if ( null !== $last_retry && is_a( $last_retry, WCS_Retry::class ) && 'pending' === $last_retry->get_status() ) {
 
 			do_action( 'woocommerce_subscriptions_before_payment_retry', $last_retry, $last_order );
 
@@ -340,6 +346,7 @@ class WCS_Retry_Manager {
 				// if both statuses are still the same or there no special status was applied and the order still needs payment (i.e. there has been no manual intervention), trigger the payment hook
 				if ( $valid_order_status && $valid_subscription_status ) {
 					$unique_payment_methods = array();
+					$subscription = null;
 
 					$last_order->update_status( 'pending', _x( 'Subscription renewal payment retry:', 'used in order note as reason for why order status changed', 'woocommerce-subscriptions' ), true );
 
@@ -447,13 +454,15 @@ class WCS_Retry_Manager {
 	 * @since 2.5.0
 	 */
 	protected static function is_scheduled_payment_attempt() {
+		$doing_action = doing_action( 'woocommerce_scheduled_subscription_payment' ) || doing_action( 'woocommerce_scheduled_subscription_payment_retry' );
+
 		/**
 		 * Filter 'Is scheduled payment attempt?'
 		 *
-		 * @param boolean doing_action( 'woocommerce_scheduled_subscription_payment' ) || doing_action( 'woocommerce_scheduled_subscription_payment_retry' )
+		 * @param boolean $doing_action
 		 * @since 2.5.0
 		 */
-		return (bool) apply_filters( 'wcs_is_scheduled_payment_attempt', doing_action( 'woocommerce_scheduled_subscription_payment' ) || doing_action( 'woocommerce_scheduled_subscription_payment_retry' ) );
+		return (bool) apply_filters( 'wcs_is_scheduled_payment_attempt', $doing_action );
 	}
 
 	/**
@@ -521,5 +530,89 @@ class WCS_Retry_Manager {
 	 */
 	public static function init_store() {
 		self::store()->init();
+	}
+
+	/**
+	 * Check if the payment retry table exists.
+	 *
+	 * @return bool True if the table exists, false otherwise.
+	 */
+	public static function retry_table_exists(): bool {
+		global $wpdb;
+
+		$table_name = $wpdb->prefix . 'wcs_payment_retries';
+
+		return $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table_name ) ) === $table_name;
+	}
+
+	/**
+	 * Show an admin notice if the retry table is missing.
+	 *
+	 * @return void
+	 */
+	public static function maybe_show_missing_table_notice() {
+		if (
+			! current_user_can( 'manage_woocommerce' ) ||
+			! self::is_retry_enabled() ||
+			self::retry_table_exists()
+		) {
+			return;
+		}
+
+		// Generate the URL to the debug tool.
+		$recreate_url = wp_nonce_url(
+			admin_url( 'admin.php?page=wc-status&tab=tools&action=retry_manager' ),
+			'debug_action'
+		);
+
+		$message = sprintf(
+			/* translators: %s: URL to recreate the table */
+			__( 'The WooCommerce Subscriptions payment retry table is missing. This may affect the automatic payment retry functionality. <a href="%s">Click here to recreate the table</a>.', 'woocommerce-subscriptions' ),
+			esc_url( $recreate_url )
+		);
+
+		wcs_add_admin_notice( $message, 'error' );
+	}
+
+	/**
+	 * Add retry manager debug tools to the WooCommerce > Status > Tools administration screen.
+	 *
+	 * @param array $tools The array of tools.
+	 * @return array The array of tools.
+	 */
+	public static function add_retry_manager_debug_tools( $tools ) {
+		if ( ! self::is_retry_enabled() ) {
+			return $tools;
+		}
+
+		$tools['retry_manager'] = [
+			'name'     => __( 'Recreate subscriptions payment retry table', 'woocommerce-subscriptions' ),
+			'button'   => __( 'Recreate', 'woocommerce-subscriptions' ),
+			'desc'     => __( 'This tool will recreate the subscription payment retry table if it is missing.', 'woocommerce-subscriptions' ),
+			'callback' => array( __CLASS__, 'recreate_payment_retry_table' ),
+		];
+
+		return $tools;
+	}
+
+	/**
+	 * Recreate the payment retry table.
+	 *
+	 * @return string Informative string to show after the tool is triggered in UI.
+	 */
+	public static function recreate_payment_retry_table(): string {
+		// Check if the table already exists.
+		if ( self::retry_table_exists() ) {
+			return __( 'The payment retry table already exists.', 'woocommerce-subscriptions' );
+		}
+
+		// Create the table.
+		if ( ! self::$table_maker ) {
+			self::$table_maker = new WCS_Retry_Table_Maker();
+		}
+
+		self::$table_maker->recreate_tables();
+
+		return __( 'Payment retry table has been successfully created.', 'woocommerce-subscriptions' );
 	}
 }

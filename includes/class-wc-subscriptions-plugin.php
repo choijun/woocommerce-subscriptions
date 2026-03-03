@@ -8,6 +8,8 @@
 
 defined( 'ABSPATH' ) || exit;
 
+use Automattic\WooCommerce_Subscriptions\Internal\Telemetry\Events as WC_Tracks_Events;
+
 /**
  * @method static WC_Subscriptions_Plugin instance()
  */
@@ -32,12 +34,19 @@ class WC_Subscriptions_Plugin extends WC_Subscriptions_Core_Plugin {
 		WCS_Call_To_Action_Button_Text_Manager::init();
 		WCS_Subscriber_Role_Manager::init();
 		WCS_Upgrade_Notice_Manager::init();
+		WCS_Admin_Assets::init();
+
+		$tracks_events = new WC_Tracks_Events();
+		$tracks_events->setup();
 
 		if ( defined( 'WP_CLI' ) && WP_CLI ) {
 			new WC_Subscriptions_CLI();
 		}
 
 		add_action( 'admin_enqueue_scripts', array( $this, 'maybe_show_welcome_message' ) );
+		add_action( 'plugins_loaded', array( $this, 'init_gifting' ) );
+		add_action( 'plugins_loaded', array( $this, 'init_downloads' ) );
+		add_action( 'admin_notices', array( WC_Subscription_Downloads_Settings::class, 'add_notice_about_bundled_feature' ) );
 	}
 
 	/**
@@ -231,5 +240,143 @@ class WC_Subscriptions_Plugin extends WC_Subscriptions_Core_Plugin {
 			</div>
 		</div>
 		<?php
+	}
+
+	/**
+	 * Attempts to initialize gifting functionality.
+	 *
+	 * Before doing this, the method tries to determine if the standalone WooCommerce Gifting plugin is active and has
+	 * already loaded (if the standalone plugin is active, we do not proceed). To accomplish this, this method expects
+	 * to run during plugins_loaded at priority 20 (whereas the equivalent code from the standalone plugin will run at
+	 * priority 11).
+	 */
+	public function init_gifting() {
+		if ( ! WCSG_Admin_Welcome_Announcement::is_welcome_announcement_dismissed() ) {
+			WCSG_Admin_Welcome_Announcement::init();
+		}
+
+		if (
+			$this->is_plugin_being_activated( 'woocommerce-subscriptions-gifting' )
+			|| function_exists( 'wcsg_load' )
+		) {
+			return;
+		}
+
+		$gifting_includes = trailingslashit( $this->get_plugin_directory( 'includes/gifting' ) );
+
+		require_once $gifting_includes . 'wcsg-compatibility-functions.php';
+
+		WCSG_Admin_Order::init();
+		WCSG_Product::init();
+		WCSG_Cart::init();
+		WCSG_Checkout::init();
+		WCSG_Recipient_Management::init();
+		WCSG_Recipient_Details::init();
+		WCSG_Email::init();
+		WCSG_Download_Handler::init();
+		WCSG_Admin::init();
+		WCSG_Recipient_Addresses::init();
+		WCSG_Template_Loader::init();
+		WCSG_Admin_System_Status::init();
+
+		add_action(
+			'init',
+			function () {
+				new WCSG_Privacy();
+			}
+		);
+
+		WCS_Gifting::init();
+	}
+
+	/**
+	 * Attempts to initialize additional downloads functionality.
+	 *
+	 * This functionality makes it possible to link downloadable products with a subscription
+	 * product. Purchasers of the subscription product then automatically get access to the files associated with downloadable product.
+	 *
+	 * Previously, this functionality existed as a standalone plugin (WooCommerce Subscription Downnloads) and so,
+	 * before initializing, we try to determine if the standalone plugin is active and has already loaded (if it is
+	 * active, we do not proceed).
+	 */
+	public function init_downloads() {
+		if (
+			$this->is_plugin_being_activated( 'woocommerce-subscription-downloads' )
+			|| class_exists( WC_Subscription_Downloads::class, false )
+		) {
+			if ( class_exists( WC_Subscription_Downloads::class, false ) ) {
+				// Will show the welcome announcement if the standalone plugin is active and the welcome announcement has not been dismissed.
+				if ( ! WC_Subscription_Downloads_Admin_Welcome_Announcement::is_welcome_announcement_dismissed() ) {
+					WC_Subscription_Downloads_Admin_Welcome_Announcement::init();
+				}
+			}
+
+			return;
+		}
+
+		WC_Subscription_Downloads::setup();
+	}
+
+	/**
+	 * Tries to determine if the specified plugin is being activated.
+	 *
+	 * The provided plugin slug can be either the complete relative plugin path (ie, 'plugin-slug/plugin-slug.php') or
+	 * just a part of the path (ie, 'plugin-slug'). So long as the plugin which is actually being activated contains
+	 * that string, then we consider ourselves to have a match and will return true.
+	 *
+	 * Therefore, consider with care how precise you need to be: something highly specific like our first example will
+	 * fail if the plugin directory has been renamed. A shorter fragment, on the other hand, will potentially match the
+	 * wrong plugin.
+	 *
+	 * This method is only useful as a means of detecting when a plugin is activated through 'conventional' means (via
+	 * the plugin admin screen, or via WP CLI), but it will not provide protection if, for example, third party code
+	 * makes its own arbitrary calls to activate_plugin().
+	 *
+	 * @param string $plugin_slug Plugin slug.
+	 *
+	 * @return bool
+	 */
+	private function is_plugin_being_activated( string $plugin_slug ): bool {
+		// Try to determine if a plugin is in the process of being activated via the plugin admin screen.
+		// phpcs:disable WordPress.Security.NonceVerification.Recommended
+		$action = isset( $_REQUEST['action'] ) ? wc_clean( wp_unslash( $_REQUEST['action'] ) ) : '';
+		// phpcs:disable WordPress.Security.NonceVerification.Recommended
+		$plugin = isset( $_REQUEST['plugin'] ) ? wc_clean( wp_unslash( $_REQUEST['plugin'] ) ) : '';
+
+		if (
+			'activate' === $action
+			&& str_contains( $plugin, $plugin_slug )
+		) {
+			return true;
+		}
+
+		// Try to determine if a plugin is being activated via WP CLI.
+		if ( class_exists( WP_CLI::class ) ) {
+			// Note that flags such as `--no-color` are filtered out of this array.
+			$args = WP_CLI::get_runner()->arguments;
+
+			if ( ! is_countable( $args ) ) {
+				return false;
+			}
+
+			if (
+				( count( $args ) < 3
+				|| 'plugin' !== $args[0]
+				|| 'activate' !== $args[1] )
+			) {
+				return false;
+			}
+
+			// The remaining arguments are the list of plugin slugs to be activated.
+			$plugins_to_be_activated = array_slice( $args, 2 );
+
+			foreach ( $plugins_to_be_activated as $plugin ) {
+				if ( str_contains( $plugin, $plugin_slug ) ) {
+					return true;
+				}
+			}
+		}
+
+		return false;
 	}
 }

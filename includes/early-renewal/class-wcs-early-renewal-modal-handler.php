@@ -39,7 +39,7 @@ class WCS_Early_Renewal_Modal_Handler {
 			'text'       => __( 'Pay now', 'woocommerce-subscriptions' ),
 			'attributes' => array(
 				'id'    => 'early_renewal_modal_submit',
-				'class' => 'button alt ',
+				'class' => 'button alt',
 				'href'  => add_query_arg( array(
 					'subscription_id'       => $subscription->get_id(),
 					'process_early_renewal' => true,
@@ -49,12 +49,19 @@ class WCS_Early_Renewal_Modal_Handler {
 			),
 		);
 
+		if ( wc_wp_theme_get_element_class_name( 'button' ) ) {
+			$place_order_action['attributes']['class'] .= ' ' . wc_wp_theme_get_element_class_name( 'button' );
+			$place_order_action['attributes']['role']   = 'button';
+		}
+
 		$callback_args = array(
 			'callback'   => array( __CLASS__, 'output_early_renewal_modal' ),
 			'parameters' => array( 'subscription' => $subscription ),
 		);
 
 		$modal = new WCS_Modal( $callback_args, '.subscription_renewal_early', 'callback', __( 'Renew early', 'woocommerce-subscriptions' ) );
+		// Set the modal ID to match the predictable value used for aria-controls in subscription-details.php
+		$modal->set_id( 'wcs-early-renewal-modal-' . $subscription->get_id() );
 		$modal->add_action( $place_order_action );
 		$modal->print_html();
 	}
@@ -144,7 +151,7 @@ class WCS_Early_Renewal_Modal_Handler {
 		if ( $renewal_order->needs_payment() ) {
 			$renewal_order->delete( true );
 			wc_add_notice( __( 'Payment for the renewal order was unsuccessful with your payment method on file, please try again.', 'woocommerce-subscriptions' ), 'error' );
-			wp_redirect( wcs_get_early_renewal_url( $subscription ) );
+			wp_safe_redirect( wcs_get_early_renewal_url( $subscription ) );
 			exit();
 		}
 
@@ -174,6 +181,10 @@ class WCS_Early_Renewal_Modal_Handler {
 		$user_id      = ! empty( $user_id ) ? absint( $user_id ) : get_current_user_id();
 		$subscription = wcs_get_subscription( $subscription );
 
+		if ( ! $subscription ) {
+			return false;
+		}
+
 		if ( ! WCS_Early_Renewal_Manager::is_early_renewal_via_modal_enabled() || ! wcs_can_user_renew_early( $subscription, $user_id ) ) {
 			return false;
 		}
@@ -187,7 +198,7 @@ class WCS_Early_Renewal_Modal_Handler {
 	 * @since 2.6.0
 	 */
 	private static function redirect() {
-		wp_redirect( remove_query_arg( array( 'process_early_renewal', 'subscription_id', 'wcs_nonce' ) ) );
+		wp_safe_redirect( remove_query_arg( array( 'process_early_renewal', 'subscription_id', 'wcs_nonce' ) ) );
 		exit();
 	}
 
@@ -197,7 +208,7 @@ class WCS_Early_Renewal_Modal_Handler {
 	 * @since 2.6.0
 	 */
 	private static function detach_renewal_callbacks() {
-		remove_filter( 'wcs_renewal_order_created', 'WC_Subscriptions_Renewal_Order::add_order_note', 10, 2 );
-		remove_filter( 'woocommerce_order_status_changed', 'WC_Subscriptions_Renewal_Order::maybe_record_subscription_payment', 10, 2 );
+		remove_filter( 'wcs_renewal_order_created', 'WC_Subscriptions_Renewal_Order::add_order_note' );
+		remove_filter( 'woocommerce_order_status_changed', 'WC_Subscriptions_Renewal_Order::maybe_record_subscription_payment' );
 	}
 }

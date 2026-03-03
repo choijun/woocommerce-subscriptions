@@ -16,9 +16,22 @@ class WCS_Retry_Post_Store extends WCS_Retry_Store {
 	/**
 	 * Setup the class, if required
 	 *
-	 * @return null
+	 * @return void
 	 */
 	public function init() {
+		if ( did_action( 'init' ) ) {
+			$this->register_payment_retry_post();
+		} else {
+			add_action( 'init', [ $this, 'register_payment_retry_post' ] );
+		}
+	}
+
+	/**
+	 * Registers the custom payment_retry post type.
+	 *
+	 * @return void
+	 */
+	public function register_payment_retry_post() {
 		register_post_type(
 			self::$post_type,
 			array(
@@ -150,6 +163,7 @@ class WCS_Retry_Post_Store extends WCS_Retry_Store {
 			'limit'      => -1,
 		) );
 
+		// We need to keep this call to `get_posts` since this is a custom post type (`payment_retry`), not a custom order type.
 		$retry_post_ids = get_posts( array(
 			'posts_per_page' => $args['limit'],
 			'post_type'      => self::$post_type,
